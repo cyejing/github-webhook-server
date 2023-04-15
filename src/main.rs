@@ -31,7 +31,7 @@ async fn main() {
     if let Err(_) = std::env::var("RUST_LOG") {
         std::env::set_var("RUST_LOG", "info");
     }
-    pretty_env_logger::init();
+    pretty_env_logger::init_timed();
 
     let args = cli::Args::parse();
 
