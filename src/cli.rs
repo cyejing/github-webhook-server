@@ -8,3 +8,4 @@ pub(crate) struct Args {
     #[arg(short, long, default_value_t = String::from("./config.toml"))]
     pub config: String,
 }
+

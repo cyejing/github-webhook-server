@@ -68,6 +68,5 @@ pub enum GithubEventTypes {
     Watch,
     WorkflowDispatch,
     WorkflowJob,
-    WorkflowRun
+    WorkflowRun,
 }
-

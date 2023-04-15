@@ -1,29 +1,29 @@
+mod cli;
 mod dto;
 mod models;
-mod cli;
 
-use std::{io, thread};
-use std::io::{BufRead, BufReader};
-use axum::{
-    routing::{get, post},
-    http::StatusCode,
-    response::IntoResponse,
-    Router,
-};
-use std::net::SocketAddr;
+use crate::dto::GithubEventTypes;
+use crate::models::{Config, Repo};
 use axum::http::HeaderMap;
 use axum::response::Response;
-use crate::dto::GithubEventTypes;
-use sha2::Sha256;
-use hmac::{Hmac, Mac};
-use once_cell::sync::{OnceCell};
-use crate::models::{Config, Repo};
-use std::process::{Command, Output, Stdio};
+use axum::{
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{get, post},
+    Router,
+};
 use clap::Parser;
+use hmac::{Hmac, Mac};
 use log::{error, info, warn};
+use once_cell::sync::OnceCell;
+use sha2::Sha256;
+use std::io::{BufRead, BufReader};
+use std::net::SocketAddr;
+use std::process::{Command, Output, Stdio};
+use std::str::FromStr;
+use std::{io, thread};
 
 static USER_CONFIG: OnceCell<Config> = OnceCell::new();
-
 
 #[tokio::main]
 async fn main() {
@@ -36,16 +36,20 @@ async fn main() {
     let args = cli::Args::parse();
 
     let config_str = std::fs::read_to_string(args.config).expect("No configuration file found");
-    USER_CONFIG.set(toml::from_str(&config_str)
-        .expect("Wrong config format or missing required configurations"))
+    USER_CONFIG
+        .set(
+            toml::from_str(&config_str)
+                .expect("Wrong config format or missing required configurations"),
+        )
         .expect("OnceCell error");
 
     let app = Router::new()
         .route("/hook", post(hook))
         .route("/", get(root));
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], USER_CONFIG.get().unwrap().port));
-    info!("listening on {}", addr);
+    let host = &USER_CONFIG.get().unwrap().host;
+    let addr = SocketAddr::from_str(host).unwrap();
+    info!("listening on {}", host);
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await
@@ -70,9 +74,14 @@ async fn hook(header: HeaderMap, body: String) -> Response {
         }
         Ok(j) => j,
     };
-    let repo_full_name = body_json.get("repository").unwrap()
-        .get("full_name").unwrap()
-        .as_str().unwrap();
+    let repo_full_name = body_json
+        .get("repository")
+        .unwrap()
+        .get("full_name")
+        .unwrap()
+        .as_str()
+        .unwrap();
+    info!("Receive repo [{repo_full_name}] event [{event}]");
 
     let maybe_repo = USER_CONFIG.get().unwrap().repos.iter().find(|repo| {
         return if repo.events.is_empty() {
@@ -108,10 +117,18 @@ async fn hook(header: HeaderMap, body: String) -> Response {
 
     let git_result = update_git_repo(&repo, &event);
     if git_result.is_err() {
-        error!("[{}][{}]ERROR WITH GIT: {:?}",repo.repo, event, git_result.unwrap_err());
-        return (StatusCode::INTERNAL_SERVER_ERROR, "Couldn't update git repo").into_response();
+        error!(
+            "[{}][{}]ERROR WITH GIT: {:?}",
+            repo.repo,
+            event,
+            git_result.unwrap_err()
+        );
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Couldn't update git repo",
+        )
+            .into_response();
     }
-
 
     // If there is a command to run
     if repo.command.is_some() {
@@ -121,7 +138,8 @@ async fn hook(header: HeaderMap, body: String) -> Response {
                 .stderr(Stdio::piped())
                 .current_dir(&repo.working_directory)
                 .args(&repo.args)
-                .spawn().unwrap();
+                .spawn()
+                .unwrap();
 
             if let Some(ref mut stdout) = child.stdout {
                 for line in BufReader::new(stdout).lines() {
@@ -139,14 +157,17 @@ async fn hook(header: HeaderMap, body: String) -> Response {
 
             let status = child.wait().unwrap();
             if status.code().is_some() {
-                info!("[{}][{}]Command finished with status {}", repo.repo, event,
-                    status.code().unwrap());
+                info!(
+                    "[{}][{}]Command finished with status {}",
+                    repo.repo,
+                    event,
+                    status.code().unwrap()
+                );
             } else {
                 info!("[{}][{}]Command finished with error", repo.repo, event);
             }
         });
     }
-
 
     StatusCode::OK.into_response()
 }
@@ -173,12 +194,24 @@ fn update_git_repo(repo: &Repo, event: &GithubEventTypes) -> Result<(), io::Erro
     let branch = &repo.branch;
 
     let output = git_fetch_all(location)?;
-    log_buffer(output.stdout, format!("{}[{}]GIT FETCH ALL", repo.repo, event).as_str());
-    log_buffer(output.stderr, format!("{}[{}]GIT FETCH ALL", repo.repo, event).as_str());
+    log_buffer(
+        output.stdout,
+        format!("{}[{}]GIT FETCH ALL", repo.repo, event).as_str(),
+    );
+    log_buffer(
+        output.stderr,
+        format!("{}[{}]GIT FETCH ALL", repo.repo, event).as_str(),
+    );
 
     let output = git_reset(branch, location)?;
-    log_buffer(output.stdout, format!("{}[{}]GIT FETCH ALL", repo.repo, event).as_str());
-    log_buffer(output.stderr, format!("{}[{}]GIT FETCH ALL", repo.repo, event).as_str());
+    log_buffer(
+        output.stdout,
+        format!("{}[{}]GIT FETCH ALL", repo.repo, event).as_str(),
+    );
+    log_buffer(
+        output.stderr,
+        format!("{}[{}]GIT FETCH ALL", repo.repo, event).as_str(),
+    );
     Ok(())
 }
 
@@ -198,3 +231,4 @@ fn check_signature(secret: &str, signature: &str, body: &str) -> bool {
     let expected_result = hex::decode(encoded_secret).unwrap();
     expected_result == result.as_slice()
 }
+
